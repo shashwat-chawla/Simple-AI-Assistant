@@ -14,10 +14,12 @@ client = OpenAI(
 
 messages= []
 
+MAX_STEPS = 5
+
 messages.append(
     {
         "role":"system",
-        "content":"Act like a very humble agent and always respond under 40 words."
+        "content":"Act like a very humble agent and always respond under 10 words."
     }
 )
 
@@ -33,36 +35,49 @@ while True:
         "content":user_input
     })    
 
-    response = client.chat.completions.create(
-        model=os.getenv("MODEL"),
-        messages=messages,
-        tools=TOOLS,
-    )
+    #chained tool calling
+    for step in range(MAX_STEPS):
 
-    msg = response.choices[0].message
-    if msg.tool_calls:
+        response = client.chat.completions.create(
+                model=os.getenv("MODEL"),
+                messages=messages,
+                tools=TOOLS,
+            )
+        
+        msg = response.choices[0].message
+
+        if not msg.tool_calls:
+            break
+
         messages.append(msg)
 
         for tool_call in msg.tool_calls:
             func_name = tool_call.function.name
-            func_args = json.loads(tool_call.function.arguments or "{}")
+            func_args ={
 
-            fn = FUNCTION_NAME_TO_FUNCTION_MAP[func_name]
-            result = fn(**func_args)
+            }
+            try:
+                 func_args = json.loads(tool_call.function.arguments or "{}")
+                 fn = FUNCTION_NAME_TO_FUNCTION_MAP[func_name]
+                 result = fn(**func_args)
+            except Exception as e:
+                result= f"Error while running {func_name} : {e}"     
+            
 
             messages.append({
                 "role":"tool",
-                "tool_id":tool_call.id,
+                "tool_call_id":tool_call.id, 
                 "content":str(result),
             })
 
-
-        response = client.chat.completions.create(
-            model=os.getenv("MODEL"),
-            messages=messages
-        )
-
-        msg = response.choices[0].message
+    else:
+        fallback = "Sorry, I couldn't finish this within the step limit."
+        messages.append({
+                "role":"assistant",
+                "content":fallback
+            })
+        print("Assitant: " + fallback)
+        continue
 
     messages.append({
         "role":"assistant",
